@@ -12,6 +12,9 @@ import { QuaiOrchardTestnet } from "../../../constants/networks/networks"
 import { NetworkInterface } from "../../../constants/networks/networkTypes"
 
 const TEST_ADDRESS = "0x208e94d5661a73360d9387d3ca169e5c130090cd"
+const WATCH_ASSET_ADDRESS = "0x004AFDb66677D177B759356D2367AeA3A79Fe58b"
+const NORMALIZED_WATCH_ASSET_ADDRESS = WATCH_ASSET_ADDRESS.toLowerCase()
+const TRUSTED_WATCH_ASSET_LOGO = `https://explorer.qu.ai/api/token/${NORMALIZED_WATCH_ASSET_ADDRESS}/icon`
 
 describe("Internal Quai Provider Service", () => {
   const sandbox = sinon.createSandbox()
@@ -62,6 +65,55 @@ describe("Internal Quai Provider Service", () => {
         (network: NetworkInterface) => network.baseAsset.name === "Fantom Opera"
       )
     ).toBeTruthy()
+  })
+
+  it("binds mainnet watch-asset artwork to the normalized explorer alias", async () => {
+    const emit = jest.spyOn(IQPService.emitter, "emit")
+
+    await IQPService.routeSafeRPCRequest(
+      "wallet_watchAsset",
+      [
+        {
+          type: "ERC20",
+          options: {
+            address: WATCH_ASSET_ADDRESS,
+            chainId: 9,
+            image: "https://tracker.invalid/misleading-token.svg",
+          },
+        },
+      ],
+      "https://example.test"
+    )
+
+    expect(emit).toHaveBeenCalledWith("watchAssetRequest", {
+      contractAddress: NORMALIZED_WATCH_ASSET_ADDRESS,
+      network: expect.objectContaining({ chainID: "9" }),
+      logoURL: TRUSTED_WATCH_ASSET_LOGO,
+    })
+  })
+
+  it("does not persist DApp artwork or add explorer behavior on testnets", async () => {
+    const emit = jest.spyOn(IQPService.emitter, "emit")
+
+    await IQPService.routeSafeRPCRequest(
+      "wallet_watchAsset",
+      [
+        {
+          type: "ERC20",
+          options: {
+            address: WATCH_ASSET_ADDRESS,
+            chainId: Number(QuaiOrchardTestnet.chainID),
+            image: "https://tracker.invalid/testnet-token.svg",
+          },
+        },
+      ],
+      "https://example.test"
+    )
+
+    expect(emit).toHaveBeenCalledWith("watchAssetRequest", {
+      contractAddress: NORMALIZED_WATCH_ASSET_ADDRESS,
+      network: QuaiOrchardTestnet,
+    })
   })
 
   it.each(["", "_v1", "_v3", "_v4"])(

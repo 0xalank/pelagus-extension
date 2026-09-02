@@ -1423,11 +1423,12 @@ export default class Main extends BaseService<never> {
 
     this.internalQuaiProviderService.emitter.on(
       "watchAssetRequest",
-      async ({ contractAddress, network }) => {
+      async ({ contractAddress, network, logoURL }) => {
         const { address } = this.store.getState().ui.selectedAccount
         const asset = await this.indexingService.addTokenToTrackByContract(
           network,
-          contractAddress
+          contractAddress,
+          logoURL ? { logoURL } : {}
         )
         if (asset) {
           await this.indexingService.retrieveTokenBalances(

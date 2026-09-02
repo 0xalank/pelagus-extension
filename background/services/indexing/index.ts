@@ -34,6 +34,7 @@ import { isQuaiHandle } from "../../constants/networks/networkUtils"
 import { PELAGUS_NETWORKS } from "../../constants/networks/networks"
 import BlockService from "../block"
 import { EnrichedQuaiTransaction } from "../transactions/types"
+import withAssetLogoURL from "./watch-asset-logo"
 
 // Transactions seen within this many blocks of the chain tip will schedule a
 // token refresh sooner than the standard rate.
@@ -723,17 +724,29 @@ export default class IndexingService extends BaseService<Events> {
   async addTokenToTrackByContract(
     network: NetworkInterface,
     contractAddress: string,
-    metadata: { discoveryTxHash?: HexString; verified?: boolean } = {}
+    metadata: {
+      discoveryTxHash?: HexString
+      verified?: boolean
+      logoURL?: string
+    } = {}
   ): Promise<SmartContractFungibleAsset | undefined> {
     const knownAsset = this.getKnownSmartContractAsset(network, contractAddress)
     if (knownAsset) {
+      const updatedAsset = withAssetLogoURL(knownAsset, metadata.logoURL)
+      if (updatedAsset !== knownAsset) {
+        await this.addOrUpdateCustomAsset(updatedAsset)
+        await this.emitter.emit("refreshAsset", updatedAsset)
+        await this.addAssetToTrack(updatedAsset)
+        return updatedAsset
+      }
+
       await this.addAssetToTrack(knownAsset)
       return knownAsset
     }
 
     // Attempt to retrieve the custom asset from the database
     // If it does not exist in the database, fetch its metadata using the provider
-    const customAsset: CustomAsset | undefined =
+    let customAsset: CustomAsset | undefined =
       (await this.db.getCustomAssetByAddressAndNetwork(
         network,
         contractAddress
@@ -744,6 +757,7 @@ export default class IndexingService extends BaseService<Events> {
       }))
     if (!customAsset) return undefined
 
+    customAsset = withAssetLogoURL(customAsset, metadata.logoURL)
     customAsset.decimals = Number(customAsset.decimals)
 
     const isRemoved = customAsset.metadata?.removed ?? false
@@ -753,8 +767,10 @@ export default class IndexingService extends BaseService<Events> {
     // If the asset has not been removed, or if it has been removed and should be re-added
     if (!isRemoved || shouldAddRemovedAssetAgain) {
       if (Object.keys(metadata).length) {
+        const metadataWithoutLogo = { ...metadata }
+        delete metadataWithoutLogo.logoURL
         customAsset.metadata ??= {}
-        Object.assign(customAsset.metadata, metadata)
+        Object.assign(customAsset.metadata, metadataWithoutLogo)
 
         if (isRemoved) customAsset.metadata.removed = false
       }

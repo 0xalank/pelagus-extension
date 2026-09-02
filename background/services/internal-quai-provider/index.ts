@@ -52,6 +52,7 @@ import TransactionService from "../transactions"
 import { QuaiTransactionRequestWithAnnotation } from "../transactions/types"
 import { ValidatedAddEthereumChainParameter } from "../provider-bridge/utils"
 import { ProviderBridgeDatabase } from "../provider-bridge/db"
+import trustedWatchAssetLogoURL from "./watch-asset-logo"
 
 export type SwitchEthereumChainParameter = {
   chainId: string
@@ -66,6 +67,7 @@ type WatchAssetParameters = {
 type WatchAssetOptions = {
   address: string // The hexadecimal address of the token contract
   chainId?: number // The chain ID of the asset. If empty, defaults to the current chain ID.
+  image?: string // Untrusted DApp input; Pelagus deliberately does not persist it.
   // Fields such as symbol and name can be present here as well - but lets just fetch them from the contract
 }
 
@@ -104,7 +106,11 @@ type Events = ServiceLifecycleEvents & {
   signTypedDataRequest: DAppRequestEvent<SignTypedDataRequest, string>
   signDataRequest: DAppRequestEvent<MessageSigningRequest, string>
   selectedNetwork: NetworkInterface
-  watchAssetRequest: { contractAddress: string; network: NetworkInterface }
+  watchAssetRequest: {
+    contractAddress: string
+    network: NetworkInterface
+    logoURL?: string
+  }
 }
 
 export default class InternalQuaiProviderService extends BaseService<Events> {
@@ -400,26 +406,27 @@ export default class InternalQuaiProviderService extends BaseService<Events> {
           throw new EIP1193Error(EIP1193_ERROR_CODES.unsupportedMethod)
         }
 
+        let network: NetworkInterface
         if (options.chainId) {
           const supportedNetwork = PELAGUS_NETWORKS.find(
-            (network) => network.chainID === String(options.chainId)
+            (candidateNetwork) =>
+              candidateNetwork.chainID === String(options.chainId)
           )
           if (!supportedNetwork) {
             throw new EIP1193Error(EIP1193_ERROR_CODES.userRejectedRequest)
           }
-          this.emitter.emit("watchAssetRequest", {
-            contractAddress: normalizeHexAddress(options.address),
-            network: supportedNetwork,
-          })
-          return true
+          network = supportedNetwork
+        } else {
+          // if chainID is not specified, we assume the current network - as per EIP-747
+          network = await this.getCurrentOrDefaultNetworkForOrigin(origin)
         }
 
-        // if chainID is not specified, we assume the current network - as per EIP-747
-        const network = await this.getCurrentOrDefaultNetworkForOrigin(origin)
-
+        const contractAddress = normalizeHexAddress(options.address)
+        const logoURL = trustedWatchAssetLogoURL(contractAddress, network)
         this.emitter.emit("watchAssetRequest", {
-          contractAddress: normalizeHexAddress(options.address),
+          contractAddress,
           network,
+          ...(logoURL ? { logoURL } : {}),
         })
         return true
       }
